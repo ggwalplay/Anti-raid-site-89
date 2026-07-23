@@ -12,6 +12,7 @@ DATA_DIR = os.path.dirname(DATA_PATH)
 WARNS_PATH = os.path.join(DATA_DIR, "warns.json")
 WHITELIST_PATH = os.path.join(DATA_DIR, "whitelist.json")
 BLACKLIST_PATH = os.path.join(DATA_DIR, "blacklist.json")
+TICKETS_PATH = os.path.join(DATA_DIR, "tickets.json")
 
 
 def charger_config() -> dict:
@@ -342,3 +343,47 @@ def check_owner():
             )
         return True
     return commands.check(predicate)
+
+
+def est_admin(membre: discord.Member) -> bool:
+    """Membre possédant la permission Discord native 'Administrateur'.
+
+    Un gérant/bypass (défini dans le .env) est aussi considéré admin
+    automatiquement, même sans la permission Discord, pour rester cohérent
+    avec le reste de la hiérarchie du bot.
+    """
+    if est_gerant(membre):
+        return True
+    return membre.guild_permissions.administrator
+
+
+def check_admin():
+    async def predicate(ctx: commands.Context) -> bool:
+        if not est_admin(ctx.author):
+            raise commands.CheckFailure(
+                "Vous n'avez pas la permission d'utiliser cette commande "
+                "(permission **Administrateur** requise)."
+            )
+        return True
+    return commands.check(predicate)
+
+
+# --- STOCKAGE DES TICKETS OUVERTS ---
+# Séparé de config.json (qui contient la configuration des types/panel) :
+# ce fichier ne contient que l'état des tickets actuellement/anciennement
+# ouverts, indexé par salon.
+
+def charger_tickets() -> dict:
+    if not os.path.isfile(TICKETS_PATH):
+        return {}
+    with open(TICKETS_PATH, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+
+
+def sauvegarder_tickets(data: dict) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(TICKETS_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
