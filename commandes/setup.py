@@ -12,6 +12,7 @@ LABELS_LOGS = {
     "sanctions": "Logs des sanctions",
     "tickets": "Logs des tickets",
     "roles": "Logs des rôles",
+    "verification": "Logs de vérification",
 }
 
 
@@ -22,6 +23,7 @@ def construire_embed_accueil(guild: discord.Guild) -> discord.Embed:
     logs_sanctions = config.get("logs_sanctions_channel")
     logs_tickets = config.get("logs_tickets_channel")
     logs_roles = config.get("logs_roles_channel")
+    logs_verification = config.get("logs_verification_channel")
 
     embed = discord.Embed(
         title="Panel de configuration",
@@ -53,6 +55,11 @@ def construire_embed_accueil(guild: discord.Guild) -> discord.Embed:
         value=f"<#{logs_roles}>" if logs_roles else "Non configuré",
         inline=True,
     )
+    embed.add_field(
+        name="Logs de vérification",
+        value=f"<#{logs_verification}>" if logs_verification else "Non configuré",
+        inline=True,
+    )
     embed.set_footer(text=f"Serveur : {guild.name}")
     return embed
 
@@ -82,6 +89,7 @@ def construire_embed_logs_menu(guild: discord.Guild) -> discord.Embed:
     logs_sanctions = config.get("logs_sanctions_channel")
     logs_tickets = config.get("logs_tickets_channel")
     logs_roles = config.get("logs_roles_channel")
+    logs_verification = config.get("logs_verification_channel")
 
     embed = discord.Embed(
         title="Logs",
@@ -106,6 +114,11 @@ def construire_embed_logs_menu(guild: discord.Guild) -> discord.Embed:
     embed.add_field(
         name="Logs des rôles",
         value=f"<#{logs_roles}>" if logs_roles else "Non configuré",
+        inline=False,
+    )
+    embed.add_field(
+        name="Logs de vérification",
+        value=f"<#{logs_verification}>" if logs_verification else "Non configuré",
         inline=False,
     )
     embed.set_footer(text=f"Serveur : {guild.name}")
@@ -278,6 +291,16 @@ class PanelLogsMenu(PanelBase):
 
         embed = construire_embed_logs_detail(interaction.guild, "roles", channel_id)
         view = PanelLogsDetail(self.guild_id, self.auteur_id, "roles")
+        view.message = interaction.message
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Vérification", style=discord.ButtonStyle.primary, row=0)
+    async def bouton_verification(self, interaction: discord.Interaction, button: discord.ui.Button):
+        config = charger_config().get(str(self.guild_id), {})
+        channel_id = config.get("logs_verification_channel")
+
+        embed = construire_embed_logs_detail(interaction.guild, "verification", channel_id)
+        view = PanelLogsDetail(self.guild_id, self.auteur_id, "verification")
         view.message = interaction.message
         await interaction.response.edit_message(embed=embed, view=view)
 
