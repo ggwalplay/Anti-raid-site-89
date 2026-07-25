@@ -11,6 +11,7 @@ LABELS_LOGS = {
     "commandes": "Logs des commandes",
     "sanctions": "Logs des sanctions",
     "tickets": "Logs des tickets",
+    "roles": "Logs des rôles",
 }
 
 
@@ -20,6 +21,7 @@ def construire_embed_accueil(guild: discord.Guild) -> discord.Embed:
     logs_commandes = config.get("logs_commandes_channel")
     logs_sanctions = config.get("logs_sanctions_channel")
     logs_tickets = config.get("logs_tickets_channel")
+    logs_roles = config.get("logs_roles_channel")
 
     embed = discord.Embed(
         title="Panel de configuration",
@@ -44,6 +46,11 @@ def construire_embed_accueil(guild: discord.Guild) -> discord.Embed:
     embed.add_field(
         name="Logs des tickets",
         value=f"<#{logs_tickets}>" if logs_tickets else "Non configuré",
+        inline=True,
+    )
+    embed.add_field(
+        name="Logs des rôles",
+        value=f"<#{logs_roles}>" if logs_roles else "Non configuré",
         inline=True,
     )
     embed.set_footer(text=f"Serveur : {guild.name}")
@@ -74,6 +81,7 @@ def construire_embed_logs_menu(guild: discord.Guild) -> discord.Embed:
     logs_commandes = config.get("logs_commandes_channel")
     logs_sanctions = config.get("logs_sanctions_channel")
     logs_tickets = config.get("logs_tickets_channel")
+    logs_roles = config.get("logs_roles_channel")
 
     embed = discord.Embed(
         title="Logs",
@@ -93,6 +101,11 @@ def construire_embed_logs_menu(guild: discord.Guild) -> discord.Embed:
     embed.add_field(
         name="Logs des tickets",
         value=f"<#{logs_tickets}>" if logs_tickets else "Non configuré",
+        inline=False,
+    )
+    embed.add_field(
+        name="Logs des rôles",
+        value=f"<#{logs_roles}>" if logs_roles else "Non configuré",
         inline=False,
     )
     embed.set_footer(text=f"Serveur : {guild.name}")
@@ -255,6 +268,16 @@ class PanelLogsMenu(PanelBase):
 
         embed = construire_embed_logs_detail(interaction.guild, "tickets", channel_id)
         view = PanelLogsDetail(self.guild_id, self.auteur_id, "tickets")
+        view.message = interaction.message
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Rôles", style=discord.ButtonStyle.primary, row=0)
+    async def bouton_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        config = charger_config().get(str(self.guild_id), {})
+        channel_id = config.get("logs_roles_channel")
+
+        embed = construire_embed_logs_detail(interaction.guild, "roles", channel_id)
+        view = PanelLogsDetail(self.guild_id, self.auteur_id, "roles")
         view.message = interaction.message
         await interaction.response.edit_message(embed=embed, view=view)
 
