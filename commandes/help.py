@@ -3,52 +3,46 @@ from discord.ext import commands
 
 from commandes._permissions import est_owner
 
-# Ordre du plus restrictif au plus permissif, utilisé pour le tri et la légende.
+# Du plus restrictif au plus permissif : détermine à la fois le label affiché
+# et l'ordre d'affichage des sections dans le help.
 NIVEAUX = [
-    ("check_owner", "🔴 Owner"),
-    ("check_gerant", "🟠 Gérant"),
-    ("check_admin", "🟡 Administrateur"),
-    ("check_staff", "🟢 Staff"),
+    ("check_owner", "🔴", "Owner"),
+    ("check_gerant", "🟠", "Gérant"),
+    ("check_admin", "🟡", "Administrateur"),
+    ("check_staff", "🟢", "Staff"),
 ]
 
-# Certaines commandes vérifient la permission manuellement dans leur corps
-# (ex: &derank, volontairement silencieuse pour les non-owners plutôt que de
-# renvoyer une erreur qui révélerait son existence) plutôt que via un
-# décorateur @check_xxx(). Ces cas ne peuvent pas être détectés automatiquement
-# depuis command.checks : on les déclare ici explicitement pour que l'audit
-# des permissions reste exact.
+# Commandes vérifiant leur permission manuellement dans le corps de la fonction
+# (ex: &derank, volontairement silencieuse pour ne pas révéler son existence
+# à un non-owner) plutôt que via un décorateur @check_xxx(). Indétectable
+# automatiquement depuis command.checks : déclaré ici pour un audit exact.
 NIVEAUX_MANUELS = {
-    "derank": "🔴 Owner (vérifié manuellement dans le code, sans message d'erreur)",
+    "derank": ("🔴", "Owner"),
 }
 
+EMOJI_PAR_DEFAUT = "⚪"
+LABEL_PAR_DEFAUT = "Public"
 
-def determiner_niveau(command: commands.Command) -> str:
-    """Déduit le niveau de permission requis à partir des checks posés sur la commande.
 
-    Repose sur le nommage des fonctions internes de _permissions.py (check_owner,
-    check_gerant, check_admin, check_staff enveloppent toutes une fonction
-    `predicate`) : leur __qualname__ ressemble à "check_admin.<locals>.predicate".
-    Aucune modification des autres fichiers de commandes n'est nécessaire, sauf
-    pour les cas listés dans NIVEAUX_MANUELS (vérification faite en dur dans le code).
-    """
+def determiner_niveau(command: commands.Command) -> tuple[str, str]:
+    """Retourne (emoji, label) du niveau de permission requis par la commande."""
     if command.qualified_name in NIVEAUX_MANUELS:
         return NIVEAUX_MANUELS[command.qualified_name]
 
     for check in command.checks:
         qualname = getattr(check, "__qualname__", "")
-        for prefixe, label in NIVEAUX:
+        for prefixe, emoji, label in NIVEAUX:
             if qualname.startswith(f"{prefixe}."):
-                return label
-    return "⚪ Public"
+                return emoji, label
+    return EMOJI_PAR_DEFAUT, LABEL_PAR_DEFAUT
 
 
 class HelpPersonnalise(commands.HelpCommand):
-    """Help command qui liste TOUTES les commandes (pour audit des permissions),
-    avec pour chacune : le niveau requis, et si l'auteur y a accès ou non.
+    """Help command listant TOUTES les commandes, regroupées par niveau de
+    permission requis (plutôt que par cog), pour un audit rapide et lisible.
 
-    Les commandes marquées hidden=True (ex: &derank) restent masquées, sauf
-    pour le(s) owner(s) du bot, qui peuvent ainsi auditer l'intégralité des
-    commandes existantes.
+    Les commandes hidden=True (ex: &derank) restent masquées, sauf pour le(s)
+    owner(s) du bot.
     """
 
     def get_command_signature(self, command: commands.Command) -> str:
@@ -61,9 +55,6 @@ class HelpPersonnalise(commands.HelpCommand):
 
     async def _est_autorise(self, command: commands.Command) -> bool:
         if command.qualified_name in NIVEAUX_MANUELS:
-            # Ces commandes ne posent pas de check décorateur : command.can_run()
-            # renverrait toujours True. On retombe sur la même règle que le code
-            # réel de la commande (ici : réservé au(x) owner(s)).
             return est_owner(self.context.author.id)
         try:
             return await command.can_run(self.context)
@@ -72,45 +63,42 @@ class HelpPersonnalise(commands.HelpCommand):
 
     async def send_bot_help(self, mapping):
         ctx = self.context
+
+        toutes_commandes = [cmd for cmds in mapping.values() for cmd in cmds]
+        visibles = [cmd for cmd in toutes_commandes if await self._est_visible(cmd)]
+
         embed = discord.Embed(
             title="📖 Commandes du bot",
-            description=(
-                f"Liste complète des commandes, avec leur niveau de permission requis.\n"
-                f"Préfixe : `{ctx.clean_prefix}`\n\n"
-                f"✅ = vous y avez accès  •  🔒 = accès refusé pour vous\n"
-                f"🔴 Owner  •  🟠 Gérant  •  🟡 Administrateur  •  🟢 Staff  •  ⚪ Public (aucun check)"
-            ),
+            description=f"Préfixe : `{ctx.clean_prefix}`  •  ✅ accessible pour vous  •  🔒 refusé",
             color=discord.Color.blurple(),
         )
         if ctx.guild:
             embed.set_author(name=ctx.guild.name, icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
 
-        au_moins_une_commande = False
+        if not visibles:
+            embed.description += "\n\n*Aucune commande trouvée.*"
+            await self.get_destination().send(embed=embed)
+            return
 
-        for cog, commandes in mapping.items():
-            commandes_visibles = [c for c in commandes if await self._est_visible(c)]
-            if not commandes_visibles:
-                continue
+        groupes: dict[tuple[str, str], list[commands.Command]] = {}
+        for commande in visibles:
+            niveau = determiner_niveau(commande)
+            groupes.setdefault(niveau, []).append(commande)
 
-            au_moins_une_commande = True
-            nom_categorie = cog.qualified_name if cog else "Général"
+        ordre_labels = [f"{emoji} {label}" for _, emoji, label in NIVEAUX] + [f"{EMOJI_PAR_DEFAUT} {LABEL_PAR_DEFAUT}"]
 
+        for emoji, label in sorted(groupes.keys(), key=lambda n: ordre_labels.index(f"{n[0]} {n[1]}")):
+            commandes_du_niveau = groupes[(emoji, label)]
             lignes = []
-            for commande in sorted(commandes_visibles, key=lambda c: c.name):
+            for commande in sorted(commandes_du_niveau, key=lambda c: c.name):
                 autorise = await self._est_autorise(commande)
                 icone = "✅" if autorise else "🔒"
-                niveau = determiner_niveau(commande)
                 description = commande.help or "Aucune description."
-                lignes.append(
-                    f"{icone} **`{ctx.clean_prefix}{commande.name}`** — {description} *({niveau})*"
-                )
+                lignes.append(f"{icone} `{ctx.clean_prefix}{commande.name}` — {description}")
 
-            embed.add_field(name=f"__{nom_categorie}__", value="\n".join(lignes), inline=False)
+            embed.add_field(name=f"{emoji}  {label}", value="\n".join(lignes), inline=False)
 
-        if not au_moins_une_commande:
-            embed.description += "\n\n*Aucune commande trouvée.*"
-
-        embed.set_footer(text=f"Tapez {ctx.clean_prefix}help <commande> pour plus de détails sur une commande.")
+        embed.set_footer(text=f"{ctx.clean_prefix}help <commande> pour le détail d'une commande")
         await self.get_destination().send(embed=embed)
 
     async def send_command_help(self, command: commands.Command):
@@ -121,7 +109,7 @@ class HelpPersonnalise(commands.HelpCommand):
             return
 
         autorise = await self._est_autorise(command)
-        niveau = determiner_niveau(command)
+        emoji, label = determiner_niveau(command)
 
         embed = discord.Embed(
             title=f"{ctx.clean_prefix}{command.qualified_name}",
@@ -129,14 +117,14 @@ class HelpPersonnalise(commands.HelpCommand):
             color=discord.Color.blurple() if autorise else discord.Color.dark_grey(),
         )
         embed.add_field(name="Utilisation", value=f"`{self.get_command_signature(command)}`", inline=False)
-        embed.add_field(name="Niveau requis", value=niveau, inline=True)
+        embed.add_field(name="Niveau requis", value=f"{emoji} {label}", inline=True)
         embed.add_field(name="Votre accès", value="✅ Autorisé" if autorise else "🔒 Refusé", inline=True)
 
         if command.aliases:
             embed.add_field(name="Alias", value=", ".join(f"`{a}`" for a in command.aliases), inline=False)
 
         if command.hidden:
-            embed.set_footer(text="⚠️ Commande cachée (masquée du help pour tout le monde sauf le(s) owner(s)).")
+            embed.set_footer(text="⚠️ Commande cachée (masquée du help pour tout le monde sauf le(s) owner(s))")
 
         await self.get_destination().send(embed=embed)
 
