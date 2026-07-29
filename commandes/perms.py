@@ -33,53 +33,45 @@ def _formater_roles(guild: discord.Guild, ids: list[int]) -> str:
 #  PANEL DE GESTION (&perms) — owner uniquement
 # ============================================================
 
+def _formater_categorie(guild: discord.Guild, fixes: list[int], extras: list[int]) -> str:
+    lignes = [f"**Fixe (.env) :** {_formater_roles(guild, fixes)}"]
+    lignes.append(f"**Ajoutés via ce panel :** {_formater_roles(guild, extras)}")
+    return "\n".join(lignes)
+
+
 def construire_embed_accueil_perms(guild: discord.Guild) -> discord.Embed:
     embed = discord.Embed(
         title="🔑 Gestion des permissions",
         description=(
             "Vue d'ensemble de la hiérarchie de permissions du bot.\n"
-            "⚠️ Les rôles **Gérant**/**Bypass** s'appliquent sur **tous les serveurs** où le bot est présent, "
-            "pas seulement celui-ci."
+            "⚠️ Les rôles **Gérant** et **Bypass** s'appliquent sur *tous les serveurs* où le bot est présent."
         ),
         color=discord.Color.gold(),
     )
 
     owners = ", ".join(f"<@{o}>" for o in get_owner_ids()) or "Aucun"
     embed.add_field(
-        name="🔴 Owner (fixe, .env uniquement)",
-        value=f"{owners}\n*Non modifiable ici — nécessite un accès au serveur du bot.*",
+        name="🔴  Owner",
+        value=f"{owners}\n*Non modifiable ici — nécessite un accès au `.env` du serveur.*",
+        inline=False,
+    )
+    embed.add_field(
+        name="🟠  Gérant",
+        value=_formater_categorie(guild, _roles_gerant_fixes(), get_roles_gerant_extra()),
+        inline=False,
+    )
+    embed.add_field(
+        name="🟣  Bypass  *(= gérant automatique)*",
+        value=_formater_categorie(guild, _roles_bypass_fixes(), get_roles_bypass_extra()),
+        inline=False,
+    )
+    embed.add_field(
+        name="🟢  Staff",
+        value=f"{_formater_roles(guild, get_roles_staff(guild.id))}\n*Géré via `&setup` → Staff (ce serveur uniquement).*",
         inline=False,
     )
 
-    embed.add_field(
-        name="🟠 Gérant — base fixe (.env)",
-        value=_formater_roles(guild, _roles_gerant_fixes()),
-        inline=True,
-    )
-    embed.add_field(
-        name="🟠 Gérant — ajoutés via ce panel",
-        value=_formater_roles(guild, get_roles_gerant_extra()),
-        inline=True,
-    )
-
-    embed.add_field(
-        name="🟣 Bypass — base fixe (.env)",
-        value=_formater_roles(guild, _roles_bypass_fixes()),
-        inline=True,
-    )
-    embed.add_field(
-        name="🟣 Bypass — ajoutés via ce panel",
-        value=_formater_roles(guild, get_roles_bypass_extra()),
-        inline=True,
-    )
-
-    embed.add_field(
-        name="🟢 Staff (ce serveur uniquement)",
-        value=_formater_roles(guild, get_roles_staff(guild.id)) + "\n*Géré via `&setup` → Staff.*",
-        inline=False,
-    )
-
-    embed.set_footer(text=f"Serveur affiché : {guild.name} • Bypass = gérant automatique")
+    embed.set_footer(text=f"Serveur affiché : {guild.name}")
     return embed
 
 
@@ -159,20 +151,13 @@ def construire_embed_gestion(guild: discord.Guild, categorie: str) -> discord.Em
     embed = discord.Embed(
         title=infos["titre"],
         description=(
-            "Sélectionnez ci-dessous l'ensemble complet des rôles supplémentaires souhaités "
-            "(remplace la sélection précédente). S'applique sur **tous les serveurs** où le bot est présent."
+            "Sélectionnez l'ensemble complet des rôles supplémentaires souhaités "
+            "(remplace la sélection précédente).\n"
+            "⚠️ S'applique sur *tous les serveurs* où le bot est présent.\n\n"
+            f"**Base fixe (.env, non modifiable ici) :**\n{_formater_roles(guild, infos['fixes']())}\n\n"
+            f"**Actuellement ajoutés via ce panel :**\n{_formater_roles(guild, infos['getter']())}"
         ),
         color=discord.Color.gold(),
-    )
-    embed.add_field(
-        name="Base fixe (.env, non modifiable ici)",
-        value=_formater_roles(guild, infos["fixes"]()),
-        inline=False,
-    )
-    embed.add_field(
-        name="Actuellement ajoutés via ce panel",
-        value=_formater_roles(guild, infos["getter"]()),
-        inline=False,
     )
     return embed
 
