@@ -13,6 +13,7 @@ TOKEN = os.getenv("TOKEN")
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.presences = True  # requis pour lire le statut personnalisé (commande &soutien)
 
 bot = commands.Bot(command_prefix="&", intents=intents)
 
