@@ -44,11 +44,52 @@ def parse_ids_env(brut: str) -> list[int]:
 
 
 def get_roles_gerant() -> list[int]:
-    return parse_ids_env(os.getenv("GERANT", ""))
+    return list(set(parse_ids_env(os.getenv("GERANT", ""))) | set(get_roles_gerant_extra()))
 
 
 def get_roles_bypass() -> list[int]:
-    return parse_ids_env(os.getenv("BYPASS", ""))
+    return list(set(parse_ids_env(os.getenv("BYPASS", ""))) | set(get_roles_bypass_extra()))
+
+
+# --- ROLES GERANT / BYPASS SUPPLEMENTAIRES (gérables via &perms) ---
+# Le .env reste la base immuable (non modifiable sans accès au serveur, donc
+# résistante même si un compte owner Discord venait à être compromis). Ces
+# rôles "extra" s'ajoutent par-dessus, stockés dans config.json sous une clé
+# globale (pas liée à un serveur précis) puisque GERANT/BYPASS s'appliquent
+# sur tous les serveurs où le bot est présent.
+
+GLOBAL_CONFIG_KEY = "_global"
+
+
+def _charger_config_globale() -> dict:
+    config = charger_config()
+    return config.get(GLOBAL_CONFIG_KEY, {})
+
+
+def _sauvegarder_config_globale(data: dict) -> None:
+    config = charger_config()
+    config[GLOBAL_CONFIG_KEY] = data
+    sauvegarder_config(config)
+
+
+def get_roles_gerant_extra() -> list[int]:
+    return _charger_config_globale().get("gerant_extra", [])
+
+
+def set_roles_gerant_extra(roles: list[int]) -> None:
+    data = _charger_config_globale()
+    data["gerant_extra"] = roles
+    _sauvegarder_config_globale(data)
+
+
+def get_roles_bypass_extra() -> list[int]:
+    return _charger_config_globale().get("bypass_extra", [])
+
+
+def set_roles_bypass_extra(roles: list[int]) -> None:
+    data = _charger_config_globale()
+    data["bypass_extra"] = roles
+    _sauvegarder_config_globale(data)
 
 
 def get_owner_ids() -> list[int]:
