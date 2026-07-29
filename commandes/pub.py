@@ -8,8 +8,6 @@ from commandes._permissions import check_admin
 INVITE_LINK = "https://discord.gg/mzFywAEYup"
 LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
 
-ANNOUNCE_KEYWORDS = ["annonce", "announcement", "announcements"]
-
 
 def build_announcement() -> tuple[discord.Embed, discord.File | None]:
     embed = discord.Embed(
@@ -35,69 +33,9 @@ def error_embed(title: str, description: str) -> discord.Embed:
     return discord.Embed(title=title, description=description, color=discord.Color.red())
 
 
-def find_target_channel(guild: discord.Guild) -> discord.TextChannel | None:
-    """Cherche un salon adapté : un salon nommé 'annonce(s)', sinon le salon système, sinon le premier salon writable."""
-    me = guild.me
-
-    for channel in guild.text_channels:
-        if any(mot in channel.name.lower() for mot in ANNOUNCE_KEYWORDS):
-            if channel.permissions_for(me).send_messages:
-                return channel
-
-    if guild.system_channel and guild.system_channel.permissions_for(me).send_messages:
-        return guild.system_channel
-
-    for channel in guild.text_channels:
-        if channel.permissions_for(me).send_messages:
-            return channel
-
-    return None
-
-
 class Pub(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    @commands.Cog.listener()
-    async def on_guild_join(self, guild: discord.Guild):
-        """Poste automatiquement l'annonce dès que le bot rejoint un nouveau serveur (n'importe lequel)."""
-        channel = find_target_channel(guild)
-        if channel is None:
-            return
-        try:
-            await send_announcement(channel)
-        except discord.Forbidden:
-            pass
-
-    @commands.command(
-        name="pubauto",
-        help="Simule ce qui se passe automatiquement quand le bot rejoint un serveur (détection du salon cible).",
-    )
-    @commands.guild_only()
-    @check_admin()
-    async def pubauto(self, ctx: commands.Context):
-        channel = find_target_channel(ctx.guild)
-        if channel is None:
-            await ctx.send(embed=error_embed(
-                "Aucun salon trouvé",
-                "Aucun salon nommé 'annonce', aucun salon système, et aucun salon où le bot peut écrire.",
-            ))
-            return
-
-        try:
-            await send_announcement(channel)
-        except discord.Forbidden:
-            await ctx.send(embed=error_embed(
-                "Erreur",
-                f"Le salon détecté est {channel.mention}, mais le bot n'a pas la permission d'y envoyer de message.",
-            ))
-            return
-
-        await ctx.send(embed=discord.Embed(
-            title="Test réussi",
-            description=f"Salon détecté automatiquement : {channel.mention}",
-            color=discord.Color.green(),
-        ))
 
     @commands.command(
         name="pub",
