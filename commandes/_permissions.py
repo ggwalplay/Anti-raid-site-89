@@ -13,6 +13,7 @@ WARNS_PATH = os.path.join(DATA_DIR, "warns.json")
 WHITELIST_PATH = os.path.join(DATA_DIR, "whitelist.json")
 BLACKLIST_PATH = os.path.join(DATA_DIR, "blacklist.json")
 TICKETS_PATH = os.path.join(DATA_DIR, "tickets.json")
+ABSENCES_PATH = os.path.join(DATA_DIR, "absences.json")
 
 
 def charger_config() -> dict:
@@ -104,6 +105,12 @@ def est_owner(user_id: int) -> bool:
 def get_roles_staff(guild_id: int) -> list[int]:
     config = charger_config()
     return config.get(str(guild_id), {}).get("staff_roles", [])
+
+
+def set_roles_staff(guild_id: int, roles: list[int]) -> None:
+    config = charger_config()
+    config.setdefault(str(guild_id), {})["staff_roles"] = roles
+    sauvegarder_config(config)
 
 
 def get_logs_channel_id(guild_id: int, categorie: str) -> int | None:
@@ -427,4 +434,22 @@ def charger_tickets() -> dict:
 def sauvegarder_tickets(data: dict) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(TICKETS_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+# --- STOCKAGE DES DEMANDES D'ABSENCE ---
+
+def charger_absences() -> dict:
+    if not os.path.isfile(ABSENCES_PATH):
+        return {}
+    with open(ABSENCES_PATH, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+
+
+def sauvegarder_absences(data: dict) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(ABSENCES_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
