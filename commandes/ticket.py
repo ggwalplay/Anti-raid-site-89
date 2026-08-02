@@ -61,7 +61,9 @@ def est_staff_du_type(membre: discord.Member, guild_id: int, type_id: str) -> bo
 #  CREATION D'UN TICKET (appelée depuis les boutons du panel public)
 # ============================================================
 
-async def creer_ticket(interaction: discord.Interaction, guild_id: int, type_id: str) -> None:
+async def creer_ticket(
+    interaction: discord.Interaction, guild_id: int, type_id: str, reponses: dict[str, str] | None = None
+) -> None:
     guild = interaction.guild
     tickets_cfg = get_tickets_config(guild_id)
     info = tickets_cfg.get("types", {}).get(type_id)
@@ -140,6 +142,11 @@ async def creer_ticket(interaction: discord.Interaction, guild_id: int, type_id:
         "claim_par": None,
         "ferme": False,
         "numero": compteur,
+        "priorite": info.get("priorite_defaut", "normal"),
+        "reponses": reponses or {},
+        "derniere_activite": datetime.now(timezone.utc).isoformat(),
+        "rappel_envoye": False,
+        "escalade_envoyee": False,
     }
     tickets.setdefault(str(guild_id), {})[str(salon.id)] = entree
     sauvegarder_tickets(tickets)
@@ -154,6 +161,8 @@ async def creer_ticket(interaction: discord.Interaction, guild_id: int, type_id:
     )
     embed.add_field(name="Ouvert par", value=interaction.user.mention, inline=True)
     embed.add_field(name="Équipe notifiée", value=", ".join(mentions_roles) or "Aucune", inline=True)
+    for question, reponse in (reponses or {}).items():
+        embed.add_field(name=question, value=(reponse or "—")[:1000], inline=False)
     embed.set_footer(text=f"ID salon : {salon.id}")
 
     contenu = " ".join([interaction.user.mention] + mentions_roles)
@@ -188,7 +197,33 @@ class BoutonOuvertureTicket(discord.ui.Button):
         self.type_id = type_id
 
     async def callback(self, interaction: discord.Interaction):
-        await creer_ticket(interaction, self.guild_id, self.type_id)
+        tickets_cfg = get_tickets_config(self.guild_id)
+        info = tickets_cfg.get("types", {}).get(self.type_id, {})
+        questions = info.get("questions") or []
+
+        if questions:
+            await interaction.response.send_modal(ModalFormulaireTicket(self.guild_id, self.type_id, questions))
+        else:
+            await creer_ticket(interaction, self.guild_id, self.type_id)
+
+
+class ModalFormulaireTicket(discord.ui.Modal, title="Avant d'ouvrir votre ticket"):
+    """Formulaire pré-ticket : jusqu'à 3 questions configurées par le staff pour ce type,
+    répondues avant la création du salon plutôt qu'une fois dedans."""
+
+    def __init__(self, guild_id: int, type_id: str, questions: list[str]):
+        super().__init__()
+        self.guild_id = guild_id
+        self.type_id = type_id
+        self.champs = []
+        for question in questions[:3]:
+            champ = discord.ui.TextInput(label=question[:45], style=discord.TextStyle.paragraph, required=True, max_length=500)
+            self.champs.append(champ)
+            self.add_item(champ)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        reponses = {champ.label: champ.value for champ in self.champs}
+        await creer_ticket(interaction, self.guild_id, self.type_id, reponses=reponses)
 
 
 class OuvertureTicketView(discord.ui.View):
@@ -259,6 +294,77 @@ class ModalAjoutMembre(discord.ui.Modal, title="Ajouter un membre au ticket"):
         await interaction.response.send_message(f"✅ {membre.mention} a été ajouté au ticket par {interaction.user.mention}.")
 
 
+async def fermer_ticket_definitivement(
+    channel: discord.TextChannel, guild: discord.Guild, ferme_par: discord.abc.User
+) -> None:
+    """Logique de fermeture partagée entre le bouton Fermer et la fermeture automatique
+    par inactivité, pour que les deux passent exactement par le même chemin (transcript,
+    log, suppression du salon, nettoyage de tickets.json)."""
+    tickets = charger_tickets()
+    entree = tickets.get(str(guild.id), {}).get(str(channel.id))
+
+    transcript_texte = await generer_transcript(channel)
+
+    embed_log = discord.Embed(
+        title="🔒 Ticket fermé",
+        description=(
+            f"Ticket **{entree.get('type_nom', '?')}** (#{entree.get('numero', 0):04d}) "
+            f"fermé par {ferme_par.mention}."
+            if entree
+            else f"Un ticket ({channel.name}) a été fermé par {ferme_par.mention}."
+        ),
+        color=discord.Color.dark_grey(),
+        timestamp=discord.utils.utcnow(),
+    )
+    if entree:
+        embed_log.add_field(name="Ouvert par", value=f"<@{entree.get('ouvert_par')}>", inline=True)
+        embed_log.add_field(
+            name="Pris en charge par",
+            value=f"<@{entree['claim_par']}>" if entree.get("claim_par") else "Personne",
+            inline=True,
+        )
+
+    fichier = discord.File(io.BytesIO(transcript_texte.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
+    channel_logs_id = get_logs_channel_id(guild.id, "tickets")
+    salon_logs = guild.get_channel(channel_logs_id) if channel_logs_id else None
+    if salon_logs is not None:
+        try:
+            await salon_logs.send(embed=embed_log, file=fichier)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    if entree is not None:
+        entree["ferme"] = True
+        entree["ferme_par"] = str(ferme_par.id)
+        entree["date_fermeture"] = datetime.now(timezone.utc).isoformat()
+        sauvegarder_tickets(tickets)
+
+        # Notifie le module d'extensions (historique/stats + feedback) si chargé.
+        # Import local pour éviter une dépendance circulaire entre les deux fichiers.
+        try:
+            from commandes.ticket_avance import notifier_fermeture_ticket
+            await notifier_fermeture_ticket(guild, entree)
+        except Exception:
+            pass
+
+    await channel.send(
+        f"🔒 Ticket fermé par {ferme_par.mention}. Suppression du salon dans "
+        f"{DUREE_AVANT_SUPPRESSION} secondes..."
+    )
+    await asyncio.sleep(DUREE_AVANT_SUPPRESSION)
+
+    try:
+        await channel.delete(reason=f"[Ticket] Fermé par {ferme_par}")
+    except discord.HTTPException:
+        pass
+
+    tickets = charger_tickets()
+    tickets_guild = tickets.get(str(guild.id), {})
+    if str(channel.id) in tickets_guild:
+        del tickets_guild[str(channel.id)]
+        sauvegarder_tickets(tickets)
+
+
 class ConfirmationFermeture(discord.ui.View):
     """Confirmation avant suppression définitive du salon, avec génération du transcript."""
 
@@ -270,65 +376,7 @@ class ConfirmationFermeture(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
-
-        channel = interaction.channel
-        guild = interaction.guild
-
-        tickets = charger_tickets()
-        entree = tickets.get(str(guild.id), {}).get(str(channel.id))
-
-        transcript_texte = await generer_transcript(channel)
-
-        embed_log = discord.Embed(
-            title="🔒 Ticket fermé",
-            description=(
-                f"Ticket **{entree.get('type_nom', '?')}** (#{entree.get('numero', 0):04d}) "
-                f"fermé par {interaction.user.mention}."
-                if entree
-                else f"Un ticket ({channel.name}) a été fermé par {interaction.user.mention}."
-            ),
-            color=discord.Color.dark_grey(),
-            timestamp=discord.utils.utcnow(),
-        )
-        if entree:
-            embed_log.add_field(name="Ouvert par", value=f"<@{entree.get('ouvert_par')}>", inline=True)
-            embed_log.add_field(
-                name="Pris en charge par",
-                value=f"<@{entree['claim_par']}>" if entree.get("claim_par") else "Personne",
-                inline=True,
-            )
-
-        fichier = discord.File(io.BytesIO(transcript_texte.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
-        channel_logs_id = get_logs_channel_id(guild.id, "tickets")
-        salon_logs = guild.get_channel(channel_logs_id) if channel_logs_id else None
-        if salon_logs is not None:
-            try:
-                await salon_logs.send(embed=embed_log, file=fichier)
-            except (discord.Forbidden, discord.HTTPException):
-                pass
-
-        if entree is not None:
-            entree["ferme"] = True
-            entree["ferme_par"] = str(interaction.user.id)
-            entree["date_fermeture"] = datetime.now(timezone.utc).isoformat()
-            sauvegarder_tickets(tickets)
-
-        await channel.send(
-            f"🔒 Ticket fermé par {interaction.user.mention}. Suppression du salon dans "
-            f"{DUREE_AVANT_SUPPRESSION} secondes..."
-        )
-        await asyncio.sleep(DUREE_AVANT_SUPPRESSION)
-
-        try:
-            await channel.delete(reason=f"[Ticket] Fermé par {interaction.user}")
-        except discord.HTTPException:
-            pass
-
-        tickets = charger_tickets()
-        tickets_guild = tickets.get(str(guild.id), {})
-        if str(channel.id) in tickets_guild:
-            del tickets_guild[str(channel.id)]
-            sauvegarder_tickets(tickets)
+        await fermer_ticket_definitivement(interaction.channel, interaction.guild, interaction.user)
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def annuler(self, interaction: discord.Interaction, button: discord.ui.Button):
