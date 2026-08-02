@@ -2,7 +2,8 @@ import asyncio
 import discord
 from discord.ext import commands
 from commandes._permissions import (
-    est_gerant,
+    est_owner,
+    est_bypass,
     get_anti_raid_status,
     activer_anti_raid,
     desactiver_anti_raid,
@@ -35,7 +36,10 @@ class AntiRaid(commands.Cog):
     # --- SANCTIONS DU STAFF FAUTIF ---
 
     async def punir_staff(self, guild: discord.Guild, moderateur: discord.Member, raison: str):
-        if moderateur.id == self.bot.user.id or est_gerant(moderateur):
+        # Exemption volontairement restreinte à l'owner (.env) et au bypass
+        # (.env + extras via &perms) : un simple rôle "gérant" ne protège plus
+        # personne de la sanction automatique en cas de raid.
+        if moderateur.id == self.bot.user.id or est_owner(moderateur.id) or est_bypass(moderateur):
             return
 
         role_punition_id = get_role_punition_id(guild.id)
