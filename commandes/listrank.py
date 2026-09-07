@@ -57,6 +57,7 @@ class ListRank(commands.Cog):
 
     @staticmethod
     def _construire_embeds(guild: discord.Guild, sanctionnables: list[discord.Member]) -> list[discord.Embed]:
+        titre = f"📋 Membres sanctionnables — {guild.name}"
         entete = (
             f"Rôle du bot : {guild.me.top_role.mention} (position {guild.me.top_role.position})\n"
             f"Sanctionnables : **{len(sanctionnables)}** / {guild.member_count} membre(s)\n"
@@ -67,7 +68,7 @@ class ListRank(commands.Cog):
         if not sanctionnables:
             return [
                 discord.Embed(
-                    title=f"📋 Membres sanctionnables — {guild.name}",
+                    title=titre,
                     description=entete + "\n\n*Aucun membre sanctionnable actuellement.*",
                     color=discord.Color.blurple(),
                 )
@@ -77,19 +78,34 @@ class ListRank(commands.Cog):
             f"{'🤖 ' if m.bot else ''}{m.mention} — {m.top_role.mention} (`{m}`)" for m in sanctionnables
         ]
         morceaux = decouper_lignes(lignes)
+        total_morceaux = len(morceaux)
 
-        embeds = []
-        for debut in range(0, len(morceaux), MAX_FIELDS_PAR_EMBED):
-            groupe = morceaux[debut : debut + MAX_FIELDS_PAR_EMBED]
-            embed = discord.Embed(
-                title=f"📋 Membres sanctionnables — {guild.name}",
-                color=discord.Color.blurple(),
-            )
-            if debut == 0:
+        # Discord limite un embed à 6000 caractères au total (titre + description
+        # + tous les fields cumulés) ET à 25 fields. On construit donc les embeds
+        # dynamiquement en suivant la taille réelle plutôt qu'un simple découpage
+        # par nombre de fields, sous peine de "Embed size exceeds maximum size".
+        LIMITE_TOTALE_EMBED = 5900  # marge de sécurité sous la limite réelle de 6000
+        embeds: list[discord.Embed] = []
+        embed: discord.Embed | None = None
+        taille_courante = 0
+
+        def nouvel_embed(avec_entete: bool) -> None:
+            nonlocal embed, taille_courante
+            embed = discord.Embed(title=titre, color=discord.Color.blurple())
+            taille_courante = len(titre)
+            if avec_entete:
                 embed.description = entete
-            for i, morceau in enumerate(groupe, start=1):
-                embed.add_field(name=f"Liste ({debut + i}/{len(morceaux)})", value=morceau, inline=False)
+                taille_courante += len(entete)
             embeds.append(embed)
+
+        nouvel_embed(avec_entete=True)
+        for i, morceau in enumerate(morceaux, start=1):
+            nom_field = f"Liste ({i}/{total_morceaux})"
+            taille_field = len(nom_field) + len(morceau)
+            if len(embed.fields) >= MAX_FIELDS_PAR_EMBED or taille_courante + taille_field > LIMITE_TOTALE_EMBED:
+                nouvel_embed(avec_entete=False)
+            embed.add_field(name=nom_field, value=morceau, inline=False)
+            taille_courante += taille_field
         return embeds
 
 
