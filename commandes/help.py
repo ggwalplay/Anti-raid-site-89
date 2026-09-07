@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from commandes._permissions import est_owner
+from commandes._permissions import decouper_lignes, est_owner
 
 # Du plus restrictif au plus permissif : détermine à la fois le label affiché
 # et l'ordre d'affichage des sections dans le help.
@@ -87,8 +87,6 @@ class HelpPersonnalise(commands.HelpCommand):
 
         ordre_labels = [f"{emoji} {label}" for _, emoji, label in NIVEAUX] + [f"{EMOJI_PAR_DEFAUT} {LABEL_PAR_DEFAUT}"]
 
-        LIMITE_FIELD = 1024
-
         for emoji, label in sorted(groupes.keys(), key=lambda n: ordre_labels.index(f"{n[0]} {n[1]}")):
             commandes_du_niveau = groupes[(emoji, label)]
             lignes = []
@@ -101,18 +99,7 @@ class HelpPersonnalise(commands.HelpCommand):
             # Un field d'embed est limité à 1024 caractères par Discord : si la liste
             # de commandes d'un niveau dépasse cette limite, on la répartit sur
             # plusieurs fields (suite) plutôt que de planter l'envoi.
-            morceaux = []
-            morceau_courant = ""
-            for ligne in lignes:
-                candidat = f"{morceau_courant}\n{ligne}" if morceau_courant else ligne
-                if len(candidat) > LIMITE_FIELD:
-                    if morceau_courant:
-                        morceaux.append(morceau_courant)
-                    morceau_courant = ligne
-                else:
-                    morceau_courant = candidat
-            if morceau_courant:
-                morceaux.append(morceau_courant)
+            morceaux = decouper_lignes(lignes)
 
             for index, morceau in enumerate(morceaux):
                 nom_field = f"{emoji}  {label}" if index == 0 else f"{emoji}  {label} (suite)"
