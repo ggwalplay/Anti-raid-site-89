@@ -416,6 +416,30 @@ def check_admin():
     return commands.check(predicate)
 
 
+# --- MISE EN FORME PARTAGÉE POUR LES EMBEDS ---
+
+def decouper_lignes(lignes: list[str], limite: int = 1024) -> list[str]:
+    """Regroupe des lignes en blocs de texte ne dépassant pas `limite` caractères
+    (limite d'un field d'embed Discord), sans jamais couper une ligne en deux.
+    Utilisé par toute commande qui affiche une liste potentiellement longue
+    (&help, &listrank, ...) pour éviter le 400 Bad Request de Discord quand
+    la liste dépasse 1024 caractères.
+    """
+    morceaux: list[str] = []
+    morceau_courant = ""
+    for ligne in lignes:
+        candidat = f"{morceau_courant}\n{ligne}" if morceau_courant else ligne
+        if len(candidat) > limite:
+            if morceau_courant:
+                morceaux.append(morceau_courant)
+            morceau_courant = ligne
+        else:
+            morceau_courant = candidat
+    if morceau_courant:
+        morceaux.append(morceau_courant)
+    return morceaux
+
+
 # --- STOCKAGE DES TICKETS OUVERTS ---
 # Séparé de config.json (qui contient la configuration des types/panel) :
 # ce fichier ne contient que l'état des tickets actuellement/anciennement
